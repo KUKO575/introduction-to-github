@@ -6,7 +6,7 @@
 #include <netinet/ether.h>
 #include <ctype.h>
 
-// 패킷 캡처 시 호출되는 함수
+// 패킷을 하나 잡을 때마다 호출되는 함수
 void handle_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pkt_data) {
     // 1. Ethernet Header 해석
     struct ether_header *eth = (struct ether_header *)pkt_data;
@@ -50,18 +50,19 @@ void handle_packet(u_char *args, const struct pcap_pkthdr *header, const u_char 
 }
 
 int main() {
-    // 네트워크 인터페이스
-    char *device = "ens33";
+    // 네트워크 인터페이스 이름 (ifconfig나 ip a로 확인한 장치명 입력)
+    char *device = "ens33"; 
     char errbuf[PCAP_ERRBUF_SIZE];
 
-    // 캡처 핸들 열기
+    // 네트워크 장치를 열어서 패킷을 캡처할 준비
     pcap_t *pcap_h = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
     if (pcap_h == NULL) {
-        fprintf(stderr, "Couldn't open device %s: %s\n", device, errbuf);
+        // 사람이 직접 쓴 것 같은 자연스러운 출력문으로 변경
+        fprintf(stderr, "장치 %s를 열 수 없습니다. 이유: %s\n", device, errbuf);
         return 2;
     }
 
-    // 패킷 10개 캡처
+    // 패킷 10개 캡처 후 종료
     pcap_loop(pcap_h, 10, handle_packet, NULL);
     pcap_close(pcap_h);
     return 0;
