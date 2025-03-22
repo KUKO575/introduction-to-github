@@ -50,7 +50,7 @@ void handle_packet(u_char *args, const struct pcap_pkthdr *header, const u_char 
 }
 
 int main() {
-    // 네트워크 인터페이스 이름 (PDF 흐름 기준)
+    // 네트워크 인터페이스
     char *device = "ens33";
     char errbuf[PCAP_ERRBUF_SIZE];
 
