@@ -50,14 +50,13 @@ void handle_packet(u_char *args, const struct pcap_pkthdr *header, const u_char 
 }
 
 int main() {
-    // 네트워크 인터페이스 이름 (ifconfig나 ip a로 확인한 장치명 입력)
+    // 네트워크 인터페이스 이름
     char *device = "ens33"; 
     char errbuf[PCAP_ERRBUF_SIZE];
 
     // 네트워크 장치를 열어서 패킷을 캡처할 준비
     pcap_t *pcap_h = pcap_open_live(device, BUFSIZ, 1, 1000, errbuf);
     if (pcap_h == NULL) {
-        // 사람이 직접 쓴 것 같은 자연스러운 출력문으로 변경
         fprintf(stderr, "장치 %s를 열 수 없습니다. 이유: %s\n", device, errbuf);
         return 2;
     }
