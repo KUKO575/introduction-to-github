@@ -1,0 +1,174 @@
+#include <stdio.h>              // 표준 입출력 함수들을 사용하기 위한 헤더 파일
+#include <stdlib.h>             // 메모리 동적 할당 및 해제를 위한 헤더 파일
+#include <string.h>             // 문자열 처리 관련 함수 사용을 위한 헤더 파일
+#include "cJSON-master/cJSON.h" // JSON 데이터를 파싱하기 위해 사용하는 외부 라이브러리 cJSON의 헤더 파일
+
+// 함수 정보를 저장하기 위한 구조체 정의
+typedef struct {
+    char name[64];            // 함수 이름을 저장하는 문자열
+    char return_type[32];     // 함수의 반환 타입을 저장하는 문자열
+    int param_count;          // 함수의 파라미터 개수를 저장하는 정수형 변수
+    char param_info[256];     // 파라미터의 타입과 이름을 문자열 형태로 저장. 각 파라미터를 문자열로 이어 붙임
+    int if_count;             // 해당 함수 내부에 존재하는 if 문 개수를 저장
+} FunctionInfo;
+
+FunctionInfo funcs[100];  // 최대 100개의 함수 정보를 저장할 수 있는 배열
+int func_count = 0;       // 현재까지 저장된 함수 개수. 함수가 발견될 때마다 증가
+int total_if = 0;         // 전체 프로그램 내 모든 함수들의 if문 개수를 누적하여 저장
+
+// JSON 노드를 순회하면서 if문 개수를 계산하는 재귀 함수
+int count_if(cJSON *node) {
+    int count = 0;
+    if (node == NULL) return 0;  // 현재 노드가 NULL인 경우 탐색할 필요가 없으므로 0 반환
+
+    if (cJSON_IsObject(node)) { // 노드가 객체일 경우
+        cJSON *ntype = cJSON_GetObjectItem(node, "_nodetype"); // 노드 타입을 나타내는 _nodetype 필드 확인
+        if (ntype && strcmp(ntype->valuestring, "If") == 0) {
+            count++;  // _nodetype 값이 If이면 if문이므로 개수 증가
+        }
+
+        // 현재 노드의 자식 노드를 모두 순회하며 재귀적으로 if문 개수를 누적
+        cJSON *child = node->child;
+        while (child) {
+            count += count_if(child);
+            child = child->next;
+        }
+    } else if (cJSON_IsArray(node)) { // 노드가 배열인 경우
+        int size = cJSON_GetArraySize(node); // 배열 크기 확인
+        for (int i = 0; i < size; i++) {
+            count += count_if(cJSON_GetArrayItem(node, i)); // 배열의 각 요소에 대해 재귀 호출
+        }
+    }
+    return count; // 전체 if문 개수 반환
+}
+
+// JSON 트리를 순회하면서 함수 정의 노드를 찾고 정보를 추출하는 함수
+void find_funcs(cJSON *node) {
+    if (node == NULL) return; // NULL인 경우 즉시 반환하여 재귀 종료
+
+    if (cJSON_IsObject(node)) {
+        cJSON *ntype = cJSON_GetObjectItem(node, "_nodetype");
+
+        if (ntype && strcmp(ntype->valuestring, "FuncDef") == 0) { // 함수 정의 노드 발견
+            FunctionInfo *f = &funcs[func_count]; // 현재 함수 정보를 저장할 구조체 포인터 설정
+            memset(f, 0, sizeof(FunctionInfo)); // 구조체를 0으로 초기화
+
+            cJSON *decl = cJSON_GetObjectItem(node, "decl"); // 함수 선언 정보 추출
+            cJSON *name = cJSON_GetObjectItem(decl, "name"); // 함수 이름 추출
+            if (name) {
+                strncpy(f->name, name->valuestring, sizeof(f->name) - 1); // 이름 복사
+            }
+
+            // 함수의 반환 타입 추출
+            cJSON *type = cJSON_GetObjectItem(decl, "type");
+            cJSON *type_type = cJSON_GetObjectItem(type, "type");
+            cJSON *inner = cJSON_GetObjectItem(type_type, "type");
+            if (inner) {
+                cJSON *names = cJSON_GetObjectItem(inner, "names");
+                if (names && cJSON_GetArraySize(names) > 0) {
+                    strncpy(f->return_type, cJSON_GetArrayItem(names, 0)->valuestring, sizeof(f->return_type) - 1); // 리턴 타입 복사
+                }
+            }
+
+            // 파라미터 정보 추출
+            cJSON *args = cJSON_GetObjectItem(type, "args");
+            if (args) {
+                cJSON *params = cJSON_GetObjectItem(args, "params");
+                if (params) {
+                    f->param_count = cJSON_GetArraySize(params); // 파라미터 개수 저장
+                    for (int i = 0; i < f->param_count; i++) {
+                        cJSON *param = cJSON_GetArrayItem(params, i);
+                        cJSON *ptype_node = cJSON_GetObjectItem(param, "type");
+                        cJSON *t_type = cJSON_GetObjectItem(ptype_node, "type");
+                        cJSON *t_names = cJSON_GetObjectItem(t_type, "names");
+                        const char *ptype = "알 수 없음"; // 기본값 설정
+                        if (t_names && cJSON_GetArraySize(t_names) > 0) {
+                            ptype = cJSON_GetArrayItem(t_names, 0)->valuestring; // 타입 추출
+                        }
+
+                        const char *pname = "(이름 없음)";
+                        if (cJSON_GetObjectItem(param, "name")) {
+                            pname = cJSON_GetObjectItem(param, "name")->valuestring; // 이름 추출
+                        }
+
+                        char temp[128];
+                        snprintf(temp, sizeof(temp), "(타입: %s, 이름: %s) ", ptype, pname); // 문자열 포맷 구성
+                        strncat(f->param_info, temp, sizeof(f->param_info) - strlen(f->param_info) - 1); // 파라미터 정보 문자열 누적 저장
+                    }
+                }
+            }
+
+            // 함수 본문에서 if문 개수 계산
+            cJSON *body = cJSON_GetObjectItem(node, "body");
+            f->if_count = count_if(body);
+            total_if += f->if_count; // 전체 if문 개수에 누적
+
+            func_count++; // 전체 함수 개수 증가
+        }
+
+        // 자식 노드들 재귀적으로 탐색
+        cJSON *child = node->child;
+        while (child) {
+            find_funcs(child);
+            child = child->next;
+        }
+    } else if (cJSON_IsArray(node)) { // 배열일 경우 모든 요소 재귀 탐색
+        int size = cJSON_GetArraySize(node);
+        for (int i = 0; i < size; i++) {
+            find_funcs(cJSON_GetArrayItem(node, i));
+        }
+    }
+}
+
+int main() {
+    FILE *fp = fopen("ast.json", "r"); // ast.json 파일을 읽기 모드로 염
+    if (!fp) {
+        printf("파일을 열 수 없습니다.\n");
+        return 1; // 파일 열기 실패 시 프로그램 종료
+    }
+
+    // 파일 전체 길이 계산 후 문자열로 읽어오기 위한 준비
+    fseek(fp, 0, SEEK_END); // 파일 포인터를 끝으로 이동
+    long len = ftell(fp);  // 파일 크기 측정
+    rewind(fp);            // 파일 포인터를 처음으로 이동
+
+    char *data = malloc(len + 1); // 파일 내용을 저장할 메모리 할당
+    fread(data, 1, len, fp);      // 파일 읽기
+    data[len] = '\0';            // 문자열 끝에 NULL 문자 추가
+    fclose(fp);                   // 파일 닫기
+
+    // 문자열로 된 JSON 파싱 시작
+    cJSON *root = cJSON_Parse(data);
+    if (!root) {
+        printf("JSON 파싱 실패했습니다.\n");
+        free(data);
+        return 1; // 파싱 실패 시 종료
+    }
+
+    find_funcs(root); // 함수 분석 수행
+
+    // 분석 결과 출력
+    printf("\n- 전체 함수 개수 : %d개\n\n", func_count);
+
+    printf("- 함수 리턴 타입 :\n");
+    for (int i = 0; i < func_count; i++) {
+        printf("  %s -> %s\n", funcs[i].name, funcs[i].return_type);
+    }
+
+    printf("\n- 함수 파라미터 정보 :\n");
+    for (int i = 0; i < func_count; i++) {
+        printf("  %s -> %s\n", funcs[i].name, funcs[i].param_info[0] ? funcs[i].param_info : "(없음)");
+    }
+
+    printf("\n- if문 개수 :\n");
+    for (int i = 0; i < func_count; i++) {
+        printf("  %s -> %d개\n", funcs[i].name, funcs[i].if_count);
+    }
+
+    printf("\n총 if문 개수 : %d개\n", total_if);
+
+    cJSON_Delete(root); // JSON 구조 메모리 해제
+    free(data);         // 파일 내용 메모리 해제
+
+    return 0; // 프로그램 정상 종료
+}
